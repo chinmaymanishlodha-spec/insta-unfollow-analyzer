@@ -6,3 +6,9 @@ gatherUsageStats = false
 [server]
 # Keep uploads in memory; do not persist. 400 MB cap is generous for exports.
 maxUploadSize = 400
+
+[theme]
+# Instagram-ish accent. Only primaryColor + font are set so the app still
+# follows the viewer's light/dark preference.
+primaryColor = "#d62976"
+font = "sans serif"

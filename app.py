@@ -13,6 +13,7 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import hmac
+import os
 
 import pandas as pd
 import streamlit as st
@@ -212,52 +213,155 @@ def _checklist(accounts: list[Account], *, key: str) -> None:
     )
 
 
-# --- UI --------------------------------------------------------------------
-
-st.title("🔍 Who doesn't follow me back?")
-st.caption(
-    "Read-only. No Instagram login, no API, no automation. Your export is "
-    "processed in memory for this session only — it is never stored or shared. "
-    "Sessions are isolated, so others using the app can't see your data."
-)
-
-with st.expander("How to get your data (one-time, ~5 min)", expanded=False):
+def _inject_css() -> None:
+    """Inject the app's visual theme (works on both light and dark Streamlit)."""
     st.markdown(
         """
-1. Open **Instagram → Accounts Center → Your information and permissions → "
-   Download your information**.
-2. Choose **Download or transfer information** → your account → **Some of your
-   information**.
-3. Under **Connections**, select **Followers and following**.
-4. Set **Format: JSON** (⚠️ *not* HTML), date range **All time**, then **Create files**.
-5. When the download is ready, save the **ZIP** and upload it below. You can also
-   unzip it and upload the individual `followers_*.json` / `following.json` files.
-        """
+        <style>
+        /* Instagram-style gradient accent reused across the app */
+        :root { --ig: linear-gradient(95deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5); }
+
+        /* Hero header */
+        .hero { padding: 1.6rem 0 0.4rem 0; }
+        .hero h1 {
+            font-size: 2.7rem; font-weight: 800; letter-spacing:-0.5px; margin:0;
+            background: var(--ig); -webkit-background-clip: text;
+            background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .hero p { font-size: 1.05rem; opacity: 0.8; margin: 0.35rem 0 0.7rem 0; }
+        .chips { margin: 0.2rem 0 0.6rem 0; }
+        .chip {
+            display:inline-block; padding:4px 12px; margin:3px 6px 3px 0;
+            border-radius:999px; font-size:0.8rem; font-weight:600;
+            background: rgba(150,150,150,0.12);
+            border:1px solid rgba(150,150,150,0.22);
+        }
+
+        /* Metric cards */
+        .cards { display:flex; flex-wrap:wrap; gap:14px; margin:0.4rem 0 0.6rem 0; }
+        .card {
+            flex:1 1 180px; border-radius:18px; padding:16px 18px;
+            background: rgba(150,150,150,0.08);
+            border:1px solid rgba(150,150,150,0.18);
+            position:relative; overflow:hidden;
+        }
+        .card::before {
+            content:""; position:absolute; left:0; top:0; bottom:0; width:5px;
+            background: var(--ig);
+        }
+        .card .lbl { font-size:0.82rem; opacity:0.72; font-weight:600; }
+        .card .val { font-size:2rem; font-weight:800; line-height:1.15; margin-top:2px; }
+        .card .sub { font-size:0.78rem; opacity:0.6; margin-top:2px; }
+
+        /* Tighten the gradient progress + buttons */
+        .stButton>button { border-radius:10px; font-weight:600; }
+        div[data-testid="stFileUploader"] {
+            border:1.5px dashed rgba(150,150,150,0.35); border-radius:16px; padding:10px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-uploads = st.file_uploader(
-    "Upload your export ZIP (or the loose followers_*.json / following.json files)",
-    type=["zip", "json"],
-    accept_multiple_files=True,
+
+def _metric_cards(cards: list[tuple[str, str, str]]) -> None:
+    """Render a row of styled metric cards. Each card = (label, value, sub)."""
+    html = '<div class="cards">'
+    for label, value, sub in cards:
+        html += (
+            f'<div class="card"><div class="lbl">{label}</div>'
+            f'<div class="val">{value}</div>'
+            f'<div class="sub">{sub}</div></div>'
+        )
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# --- UI --------------------------------------------------------------------
+
+_inject_css()
+
+st.markdown(
+    """
+    <div class="hero">
+      <h1>Who doesn't follow me back?</h1>
+      <p>See who you follow that doesn't follow you back — plus a dashboard,
+         an assisted unfollow checklist, and more insights.</p>
+      <div class="chips">
+        <span class="chip">🔒 No login</span>
+        <span class="chip">🛡️ No password</span>
+        <span class="chip">⚡ In-memory only</span>
+        <span class="chip">🙈 Sessions isolated</span>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-if not uploads:
-    st.stop()
+# Determine the data source: a fresh upload, or the bundled sample demo.
+uploads = st.file_uploader(
+    "Drop your Instagram export ZIP here (or the loose followers_*.json / following.json files)",
+    type=["zip", "json"],
+    accept_multiple_files=True,
+    label_visibility="visible",
+)
 
-# Combine multiple uploads: if any ZIP is present parse it; merge any loose JSONs.
+if "use_sample" not in st.session_state:
+    st.session_state.use_sample = False
+
+if not uploads:
+    cta1, cta2 = st.columns([1, 2])
+    with cta1:
+        if st.button("✨ Try it with sample data", use_container_width=True, type="primary"):
+            st.session_state.use_sample = True
+    with cta2:
+        st.caption(
+            "No export yet? Click **Try it with sample data** to explore the full "
+            "experience instantly with a fake account."
+        )
+
+    with st.expander("📥 How to get your real Instagram data (one-time, ~5 min)"):
+        st.markdown(
+            """
+1. **Instagram → Accounts Center → Your information and permissions → Download your information**
+2. **Download or transfer information** → your account → **Some of your information**
+3. Under **Connections**, tick **Followers and following**
+4. **Format: JSON** (⚠️ *not* HTML), date range **All time** → **Create files**
+5. When Instagram emails you the **ZIP**, upload it above. (Loose `followers_*.json` /
+   `following.json` files work too.)
+            """
+        )
+
+    if not st.session_state.use_sample:
+        st.stop()
+
+# Parse the chosen source.
 parsed: ParsedExport | None = None
 try:
-    merged_following: dict[str, Account] = {}
-    merged_followers: dict[str, Account] = {}
-    sources: list[str] = []
-    for up in uploads:
-        p = parse_upload(up.name, up.getvalue())
-        for k, v in p.following.items():
-            merged_following.setdefault(k, v)
-        for k, v in p.followers.items():
-            merged_followers.setdefault(k, v)
-        sources.extend(p.sources)
-    parsed = ParsedExport(merged_following, merged_followers, sources)
+    if uploads:
+        st.session_state.use_sample = False  # a real upload overrides the demo
+        merged_following: dict[str, Account] = {}
+        merged_followers: dict[str, Account] = {}
+        merged_extras: dict[str, dict[str, Account]] = {}
+        sources: list[str] = []
+        for up in uploads:
+            p = parse_upload(up.name, up.getvalue())
+            for k, v in p.following.items():
+                merged_following.setdefault(k, v)
+            for k, v in p.followers.items():
+                merged_followers.setdefault(k, v)
+            for label, m in p.extras.items():
+                merged_extras.setdefault(label, {}).update(m)
+            sources.extend(p.sources)
+        parsed = ParsedExport(merged_following, merged_followers, sources, merged_extras)
+    else:
+        # Bundled sample demo.
+        import parser as _parser
+
+        sample_zip = os.path.join(os.path.dirname(__file__), "sample_data", "export.zip")
+        with open(sample_zip, "rb") as fh:
+            parsed = _parser.parse_zip(fh.read())
+        st.info("👀 You're viewing **sample data**. Upload your own export above to analyze your account.")
 except HTMLExportError as exc:
     st.error(str(exc))
     st.stop()
@@ -278,7 +382,7 @@ result = _run_analysis(parsed)
 
 following_n = len(parsed.following)
 followers_n = len(parsed.followers)
-st.success(f"Parsed **{following_n}** following and **{followers_n}** followers.")
+st.success(f"✅ Analyzed **{following_n:,}** following and **{followers_n:,}** followers.")
 with st.expander("Source files detected"):
     st.write(parsed.sources or "—")
 
@@ -310,16 +414,18 @@ tab_dash, tab_unfollow, tab_fans, tab_mutual, tab_more = st.tabs(
 with tab_dash:
     stats = summary_stats(following_n, followers_n, result)
 
-    a, b, c, d = st.columns(4)
-    a.metric("👣 Following", following_n)
-    b.metric("👥 Followers", followers_n)
-    c.metric("⚖️ Follower/Following", stats["follower_following_ratio"])
-    d.metric("🚫 Don't follow back", result.counts["not_following_back"])
-
-    e, f, g = st.columns(3)
-    e.metric("% you follow who ignore you", f"{stats['pct_following_not_back']}%")
-    f.metric("% of fans you ignore", f"{stats['pct_followers_not_back']}%")
-    g.metric("🤝 Mutual rate", f"{stats['mutual_rate']}%")
+    _metric_cards([
+        ("👣 Following", f"{following_n:,}", "accounts you follow"),
+        ("👥 Followers", f"{followers_n:,}", "accounts following you"),
+        ("⚖️ Ratio", f"{stats['follower_following_ratio']}", "followers per following"),
+        ("🚫 Don't follow back", f"{result.counts['not_following_back']:,}", "your unfollow candidates"),
+    ])
+    _metric_cards([
+        ("🙈 You ignore", f"{result.counts['not_followed_back']:,}", "fans you don't follow back"),
+        ("🤝 Mutuals", f"{result.counts['mutuals']:,}", f"{stats['mutual_rate']}% mutual rate"),
+        ("📉 Ignored by", f"{stats['pct_following_not_back']}%", "of accounts you follow"),
+        ("📈 You ignore", f"{stats['pct_followers_not_back']}%", "of your followers"),
+    ])
 
     st.divider()
     st.subheader("📈 Your following activity over time")
