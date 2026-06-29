@@ -39,15 +39,36 @@ files) in the browser. The app finds the relevant files anywhere inside the ZIP.
 
 ## Features
 
-- **Three views:** *Not following me back* (headline / unfollow candidates),
-  *I don't follow back*, and *Mutuals* — with live counts.
+- **📊 Dashboard:** following/followers counts, follower-to-following ratio,
+  % of people you follow who ignore you, % of fans you ignore, mutual rate, and
+  bar charts of your **following activity over time** and **when people followed
+  you** (IST months).
+- **✅ Assisted unfollow checklist:** the *not following me back* list as an
+  interactive checklist — tick each account off as you unfollow it manually in
+  Instagram, with a live progress bar and one-tap profile links. No login, no
+  automation, **so it cannot get your account flagged.** Download the remaining
+  to-do list as CSV.
+- **🙈 I don't follow back** and **🤝 Mutuals** views.
+- **🧩 More insights:** oldest one-way follows (best to clear first), plus any
+  extra relationship lists your export contains (close friends, recently
+  unfollowed, pending follow requests, blocked, restricted, …) shown
+  automatically when present.
 - **Clickable profile links** and **follow dates rendered in IST (Asia/Kolkata)**.
-- **Whitelist:** paste usernames (one per line) to exclude from the unfollow
-  candidate list; filtering updates live.
-- **CSV download** of any displayed list.
+- **Whitelist** (sidebar): usernames to exclude from the candidate list/checklist.
+- **CSV download** of any list.
 - **Defensive parser:** handles ZIP or loose files, both export schema shapes
   (top-level list *and* `relationships_*` wrapper), split `followers_1/2/...`
-  parts, case differences, and rejects HTML exports with a clear message.
+  parts, case differences, extra relationship files, and rejects HTML exports
+  with a clear message.
+
+### Why there's no "log in and auto-unfollow" button
+
+Instagram's official API does not expose personal follow lists or an unfollow
+action, so the only way to automate it is an unofficial bot driven by your
+password — which **violates Instagram's Terms and reliably gets accounts banned**
+(bulk unfollowing is the most-detected bot behavior, and logins from a cloud/
+datacenter IP get challenged immediately). This tool deliberately keeps *you* in
+control of the actual unfollowing and just makes deciding + tracking effortless.
 
 ## Deploy to the cloud (Streamlit Community Cloud — free)
 

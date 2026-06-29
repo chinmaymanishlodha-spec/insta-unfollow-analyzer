@@ -43,6 +43,24 @@ class NoDataError(Exception):
 _FOLLOWING_PREFIX = "following"
 _FOLLOWERS_PREFIX = "followers"
 
+# Optional "extra" relationship files Instagram includes in the same export.
+# Map: file-stem prefix -> human-readable category label. These are surfaced as
+# bonus insights only when present; absence is never an error. Each is parsed
+# with the same defensive _extract_items shape handling as the core files.
+_EXTRA_FILES: list[tuple[str, str]] = [
+    ("pending_follow_requests", "Pending sent follow requests"),
+    ("recent_follow_requests", "Recent follow requests"),
+    ("recently_unfollowed_accounts", "Recently unfollowed"),
+    ("recently_unfollowed_profiles", "Recently unfollowed"),
+    ("close_friends", "Close friends"),
+    ("blocked_accounts", "Blocked accounts"),
+    ("blocked_profiles", "Blocked accounts"),
+    ("restricted_accounts", "Restricted accounts"),
+    ("restricted_profiles", "Restricted accounts"),
+    ("follow_requests_you've_received", "Follow requests you received"),
+    ("removed_suggestions", "Removed suggestions"),
+]
+
 
 def _looks_like_html(raw: bytes) -> bool:
     """Heuristically detect an HTML export by sniffing the leading bytes."""
@@ -68,6 +86,23 @@ def _classify(filename: str) -> Optional[str]:
         return "followers"
     if stem.startswith(_FOLLOWING_PREFIX):
         return "following"
+    return None
+
+
+def _classify_extra(filename: str) -> Optional[str]:
+    """Classify a file as one of the optional EXTRA relationship categories.
+
+    Returns the human-readable category label, or None if the file is not a
+    recognized extra. Matching is on the lowercased basename stem.
+    """
+
+    name = PurePosixPath(filename.replace("\\", "/")).name.lower()
+    if not name.endswith(".json"):
+        return None
+    stem = name[: -len(".json")]
+    for prefix, label in _EXTRA_FILES:
+        if stem.startswith(prefix):
+            return label
     return None
 
 
@@ -162,10 +197,14 @@ class ParsedExport:
         following: dict[str, Account],
         followers: dict[str, Account],
         sources: list[str],
+        extras: Optional[dict[str, dict[str, Account]]] = None,
     ) -> None:
         self.following = following
         self.followers = followers
         self.sources = sources
+        # category label -> {normalized-username -> Account}; only present
+        # categories appear. Empty when the export omits these files.
+        self.extras: dict[str, dict[str, Account]] = extras or {}
 
 
 def parse_files(named_blobs: dict[str, bytes]) -> ParsedExport:
@@ -184,20 +223,40 @@ def parse_files(named_blobs: dict[str, bytes]) -> ParsedExport:
 
     following: dict[str, Account] = {}
     followers: dict[str, Account] = {}
+    extras: dict[str, dict[str, Account]] = {}
     sources: list[str] = []
 
     for name, raw in named_blobs.items():
+        base = PurePosixPath(name.replace("\\", "/")).name
         kind = _classify(name)
-        if kind is None:
+        if kind is not None:
+            items = _parse_json_bytes(raw, source=base)
+            accounts = _accounts_from_items(items)
+            if not accounts:
+                continue
+            target = following if kind == "following" else followers
+            for key, acct in accounts.items():
+                target.setdefault(key, acct)  # merge split parts; first wins
+            sources.append(f"{base} ({kind}, {len(accounts)})")
             continue
-        items = _parse_json_bytes(raw, source=PurePosixPath(name.replace("\\", "/")).name)
-        accounts = _accounts_from_items(items)
-        if not accounts:
-            continue
-        target = following if kind == "following" else followers
-        for key, acct in accounts.items():
-            target.setdefault(key, acct)  # merge split parts; first wins
-        sources.append(f"{PurePosixPath(name.replace(chr(92), '/')).name} ({kind}, {len(accounts)})")
+
+        label = _classify_extra(name)
+        if label is not None:
+            # Extras are best-effort: a parse hiccup here must not break the
+            # core analysis, so swallow non-HTML errors for these files.
+            try:
+                items = _parse_json_bytes(raw, source=base)
+            except HTMLExportError:
+                raise
+            except NoDataError:
+                continue
+            accounts = _accounts_from_items(items)
+            if not accounts:
+                continue
+            bucket = extras.setdefault(label, {})
+            for key, acct in accounts.items():
+                bucket.setdefault(key, acct)
+            sources.append(f"{base} ({label}, {len(accounts)})")
 
     if not following and not followers:
         raise NoDataError(
@@ -205,7 +264,7 @@ def parse_files(named_blobs: dict[str, bytes]) -> ParsedExport:
             "upload. Make sure you exported 'Followers and following' in JSON "
             "format and uploaded the ZIP or those JSON files."
         )
-    return ParsedExport(following, followers, sources)
+    return ParsedExport(following, followers, sources, extras)
 
 
 def parse_zip(data: Union[bytes, io.BytesIO, "zipfile.ZipFile"]) -> ParsedExport:
@@ -231,7 +290,7 @@ def parse_zip(data: Union[bytes, io.BytesIO, "zipfile.ZipFile"]) -> ParsedExport
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            if _classify(info.filename) is None:
+            if _classify(info.filename) is None and _classify_extra(info.filename) is None:
                 continue
             named_blobs[info.filename] = zf.read(info)
         return parse_files(named_blobs)

@@ -77,10 +77,17 @@ def build() -> None:
     followers1 = [_item(u, t) for u, t in FOLLOWERS_PART1]
     followers2 = [_item(u, t) for u, t in FOLLOWERS_PART2]
 
+    # An optional "extra" file to exercise the extras path (close friends here
+    # uses the dict-wrapper shape with a relationships_* key).
+    close_friends_obj = {
+        "relationships_close_friends": [_item("alice", 1609459200), _item("carol", 1614556800)]
+    }
+
     files = {
         "following.json": following_obj,
         "followers_1.json": followers1,
         "followers_2.json": followers2,
+        "close_friends.json": close_friends_obj,
     }
     for name, obj in files.items():
         path = os.path.join(HERE, name)

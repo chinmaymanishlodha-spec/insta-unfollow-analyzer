@@ -101,6 +101,33 @@ def analyze(
     )
 
 
+def summary_stats(following_count: int, followers_count: int, result: AnalysisResult) -> dict[str, float]:
+    """Derive headline ratios/percentages from the raw counts and analysis.
+
+    Pure function (no I/O) so it can be unit-tested. All percentages are 0-100
+    floats rounded to one decimal; ratios are rounded to two decimals. Division
+    guards against zero so an empty side yields 0.0 rather than raising.
+
+    Returns keys:
+        follower_following_ratio: followers / following
+        pct_following_not_back:   % of the people you follow who don't follow you
+        pct_followers_not_back:   % of your followers you don't follow back
+        mutual_rate:              % of the people you follow who are mutual
+    """
+
+    def pct(part: int, whole: int) -> float:
+        return round(100.0 * part / whole, 1) if whole else 0.0
+
+    return {
+        "follower_following_ratio": round(followers_count / following_count, 2)
+        if following_count
+        else 0.0,
+        "pct_following_not_back": pct(result.counts["not_following_back"], following_count),
+        "pct_followers_not_back": pct(result.counts["not_followed_back"], followers_count),
+        "mutual_rate": pct(result.counts["mutuals"], following_count),
+    }
+
+
 def apply_whitelist(accounts: list[Account], whitelist: list[str]) -> list[Account]:
     """Filter out whitelisted usernames (case-insensitive) from a list.
 

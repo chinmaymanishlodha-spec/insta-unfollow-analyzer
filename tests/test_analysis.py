@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis import Account, analyze, apply_whitelist, normalize
+from analysis import Account, analyze, apply_whitelist, normalize, summary_stats
 
 
 def _map(*usernames: str) -> dict[str, Account]:
@@ -68,3 +68,25 @@ def test_apply_whitelist_removes_case_insensitively_and_strips_at():
 def test_apply_whitelist_noop_when_empty():
     accounts = [Account("carol"), Account("dave")]
     assert apply_whitelist(accounts, []) == accounts
+
+
+def test_summary_stats_basic():
+    following = _map("alice", "Bob", "carol", "dave", "EVE")
+    followers = _map("Alice", "bob", "Frank", "GRACE", "heidi")
+    result = analyze(following, followers)
+    stats = summary_stats(5, 5, result)
+    assert stats["follower_following_ratio"] == 1.0
+    assert stats["pct_following_not_back"] == 60.0  # 3 of 5
+    assert stats["pct_followers_not_back"] == 60.0  # 3 of 5
+    assert stats["mutual_rate"] == 40.0             # 2 of 5
+
+
+def test_summary_stats_handles_zero_division():
+    result = analyze({}, {})
+    stats = summary_stats(0, 0, result)
+    assert stats == {
+        "follower_following_ratio": 0.0,
+        "pct_following_not_back": 0.0,
+        "pct_followers_not_back": 0.0,
+        "mutual_rate": 0.0,
+    }

@@ -17,7 +17,13 @@ import hmac
 import pandas as pd
 import streamlit as st
 
-from analysis import Account, AnalysisResult, analyze, apply_whitelist
+from analysis import (
+    Account,
+    AnalysisResult,
+    analyze,
+    apply_whitelist,
+    summary_stats,
+)
 from parser import HTMLExportError, NoDataError, ParsedExport, parse_upload
 
 IST = "Asia/Kolkata"
@@ -129,6 +135,83 @@ def _run_analysis(parsed: ParsedExport) -> AnalysisResult:
     return analyze(parsed.following, parsed.followers)
 
 
+def _monthly_counts(accounts: list[Account], label: str) -> pd.DataFrame:
+    """Group accounts by the IST month of their timestamp for a bar chart.
+
+    Returns a DataFrame indexed by 'YYYY-MM' month string with one count column.
+    Accounts without a usable timestamp are ignored. Empty if none have dates.
+    """
+    ts = [a.timestamp for a in accounts if a.timestamp]
+    if not ts:
+        return pd.DataFrame()
+    s = pd.to_datetime(pd.Series(ts), unit="s", utc=True).dt.tz_convert(IST)
+    months = s.dt.strftime("%Y-%m")
+    counts = months.value_counts().sort_index()
+    return pd.DataFrame({label: counts.values}, index=counts.index)
+
+
+def _checklist(accounts: list[Account], *, key: str) -> None:
+    """Assisted manual-unfollow checklist.
+
+    Renders an editable table with a 'Done' checkbox per account plus a progress
+    bar. The user ticks each row off as they unfollow it manually in Instagram
+    (the profile link opens the account in one tap). Checkbox state persists
+    across reruns via the widget key. No automation, no Instagram calls — this is
+    purely a personal tracker, which is why it cannot get your account banned.
+    """
+    if not accounts:
+        st.info("🎉 Nothing to unfollow here (after your whitelist).")
+        return
+
+    base = _to_dataframe(accounts)
+    editable = pd.DataFrame(
+        {
+            "Done": False,
+            "Username": base["Username"],
+            "Profile": base["Profile URL"],
+            "Followed on (IST)": base["Followed on (IST)"],
+        }
+    )
+
+    progress_slot = st.empty()
+    edited = st.data_editor(
+        editable,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Username", "Profile", "Followed on (IST)"],  # only 'Done' editable
+        column_config={
+            "Done": st.column_config.CheckboxColumn(
+                "Unfollowed?", help="Tick after you unfollow this account in Instagram"
+            ),
+            "Username": st.column_config.TextColumn("Username", width="medium"),
+            "Profile": st.column_config.LinkColumn("Open", display_text="Open ↗"),
+            "Followed on (IST)": st.column_config.DatetimeColumn(
+                "Followed on (IST)", format="YYYY-MM-DD HH:mm", timezone=IST
+            ),
+        },
+        key=f"editor_{key}",
+    )
+
+    total = len(edited)
+    done = int(edited["Done"].sum())
+    with progress_slot.container():
+        st.progress(done / total if total else 0.0, text=f"Unfollowed {done} of {total}")
+
+    # CSV of the still-to-do accounts.
+    todo = edited[~edited["Done"]].copy()
+    if not todo.empty and "Followed on (IST)" in todo:
+        todo["Followed on (IST)"] = pd.to_datetime(
+            todo["Followed on (IST)"], errors="coerce"
+        ).dt.strftime("%Y-%m-%d %H:%M:%S %z")
+    st.download_button(
+        "⬇️ Download remaining (to-do) list as CSV",
+        data=todo.drop(columns=["Done"]).to_csv(index=False).encode("utf-8"),
+        file_name=f"{key}_todo.csv",
+        mime="text/csv",
+        key=f"dl_{key}",
+    )
+
+
 # --- UI --------------------------------------------------------------------
 
 st.title("🔍 Who doesn't follow me back?")
@@ -193,55 +276,81 @@ if not parsed.following:
 
 result = _run_analysis(parsed)
 
-st.success(
-    f"Parsed **{len(parsed.following)}** following and "
-    f"**{len(parsed.followers)}** followers."
-)
+following_n = len(parsed.following)
+followers_n = len(parsed.followers)
+st.success(f"Parsed **{following_n}** following and **{followers_n}** followers.")
 with st.expander("Source files detected"):
     st.write(parsed.sources or "—")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("🚫 Not following me back", result.counts["not_following_back"])
-c2.metric("🙈 I don't follow back", result.counts["not_followed_back"])
-c3.metric("🤝 Mutuals", result.counts["mutuals"])
-
-st.divider()
-
-# Whitelist for the headline list.
-st.subheader("Whitelist (keep these, exclude from candidates)")
-whitelist_raw = st.text_area(
-    "One username per line. These are removed from the 'not following me back' "
-    "list below (e.g. accounts you intentionally keep).",
-    placeholder="celebrity_i_like\nmy_alt_account",
-    height=100,
-)
+# Whitelist (used by the candidate list + checklist). Put it in the sidebar so it
+# applies across tabs.
+with st.sidebar:
+    st.header("⚙️ Settings")
+    whitelist_raw = st.text_area(
+        "Whitelist — keep these (one username per line)",
+        help="Removed from the 'not following me back' candidate list & checklist.",
+        placeholder="celebrity_i_like\nmy_alt_account",
+        height=140,
+    )
 whitelist = whitelist_raw.splitlines() if whitelist_raw else []
-
 headline = apply_whitelist(result.not_following_back, whitelist)
 excluded_n = len(result.not_following_back) - len(headline)
 
-tab1, tab2, tab3 = st.tabs(
+tab_dash, tab_unfollow, tab_fans, tab_mutual, tab_more = st.tabs(
     [
-        f"🚫 Not following me back ({len(headline)})",
+        "📊 Dashboard",
+        f"✅ Unfollow candidates ({len(headline)})",
         f"🙈 I don't follow back ({result.counts['not_followed_back']})",
         f"🤝 Mutuals ({result.counts['mutuals']})",
+        "🧩 More insights",
     ]
 )
 
-with tab1:
+# --- Dashboard -------------------------------------------------------------
+with tab_dash:
+    stats = summary_stats(following_n, followers_n, result)
+
+    a, b, c, d = st.columns(4)
+    a.metric("👣 Following", following_n)
+    b.metric("👥 Followers", followers_n)
+    c.metric("⚖️ Follower/Following", stats["follower_following_ratio"])
+    d.metric("🚫 Don't follow back", result.counts["not_following_back"])
+
+    e, f, g = st.columns(3)
+    e.metric("% you follow who ignore you", f"{stats['pct_following_not_back']}%")
+    f.metric("% of fans you ignore", f"{stats['pct_followers_not_back']}%")
+    g.metric("🤝 Mutual rate", f"{stats['mutual_rate']}%")
+
+    st.divider()
+    st.subheader("📈 Your following activity over time")
+    follow_hist = _monthly_counts(list(parsed.following.values()), "Accounts you followed")
+    if follow_hist.empty:
+        st.caption("No follow-date timestamps available in this export.")
+    else:
+        st.bar_chart(follow_hist)
+
+    foll_hist = _monthly_counts(list(parsed.followers.values()), "New followers")
+    if not foll_hist.empty:
+        st.subheader("📈 When people followed you")
+        st.bar_chart(foll_hist)
+
+# --- Unfollow candidates (assisted checklist) ------------------------------
+with tab_unfollow:
     st.markdown(
-        "Accounts **you follow** that **don't follow you back** — your unfollow "
-        "candidates."
+        "Accounts **you follow** that **don't follow you back**. Tick each one off "
+        "as you unfollow it manually in Instagram — the **Open ↗** link takes you "
+        "straight to the profile."
+    )
+    st.caption(
+        "ℹ️ This is a personal tracker — it never logs in or unfollows for you, so "
+        "it can't get your account flagged. Unfollow at a human pace."
     )
     if excluded_n:
-        st.caption(f"{excluded_n} account(s) hidden by your whitelist.")
-    _show_table(
-        headline,
-        key="not_following_back",
-        empty_msg="🎉 Everyone you follow follows you back (after whitelist).",
-    )
+        st.caption(f"{excluded_n} account(s) hidden by your whitelist (sidebar).")
+    _checklist(headline, key="unfollow_candidates")
 
-with tab2:
+# --- Fans I don't follow back ----------------------------------------------
+with tab_fans:
     st.markdown("Accounts that **follow you** but **you don't follow back**.")
     _show_table(
         result.not_followed_back,
@@ -249,10 +358,34 @@ with tab2:
         empty_msg="You follow back everyone who follows you.",
     )
 
-with tab3:
+# --- Mutuals ---------------------------------------------------------------
+with tab_mutual:
     st.markdown("Accounts where the follow is **mutual**.")
-    _show_table(
-        result.mutuals,
-        key="mutuals",
-        empty_msg="No mutual follows found.",
-    )
+    _show_table(result.mutuals, key="mutuals", empty_msg="No mutual follows found.")
+
+# --- More insights ---------------------------------------------------------
+with tab_more:
+    st.subheader("🕰️ Oldest accounts that don't follow you back")
+    st.caption("Long-standing one-way follows — often the best to clear out first.")
+    dated = [a for a in result.not_following_back if a.timestamp]
+    oldest = sorted(dated, key=lambda a: a.timestamp)[:25]
+    _show_table(oldest, key="oldest_non_followers", empty_msg="No dated follows found.")
+
+    if parsed.extras:
+        st.divider()
+        st.subheader("📂 Other relationship lists in your export")
+        st.caption("These appear only because your export included them.")
+        for label, accounts_map in parsed.extras.items():
+            accounts = sorted(accounts_map.values(), key=lambda a: a.username.lower())
+            with st.expander(f"{label} ({len(accounts)})"):
+                _show_table(
+                    accounts,
+                    key=f"extra_{label}".replace(" ", "_"),
+                    empty_msg="—",
+                )
+    else:
+        st.divider()
+        st.caption(
+            "💡 Tip: include 'close friends', 'recently unfollowed', 'pending follow "
+            "requests', 'blocked' etc. in your export and they'll show up here too."
+        )

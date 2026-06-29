@@ -126,6 +126,36 @@ def test_parse_upload_dispatches_zip_and_json():
     assert set(json_parsed.followers) == {"solo"}
 
 
+def test_extras_parsed_from_loose_files():
+    cf = json.dumps({"relationships_close_friends": [_item("a"), _item("b")]}).encode()
+    parsed = parse_files(
+        {"following.json": json.dumps([_item("x")]).encode(), "close_friends.json": cf}
+    )
+    assert "Close friends" in parsed.extras
+    assert set(parsed.extras["Close friends"]) == {"a", "b"}
+
+
+def test_extras_parsed_from_zip_fixture():
+    with open(os.path.join(SAMPLE_DIR, "export.zip"), "rb") as fh:
+        parsed = parse_zip(fh.read())
+    assert "Close friends" in parsed.extras
+    assert set(parsed.extras["Close friends"]) == {"alice", "carol"}
+
+
+def test_extras_absent_when_not_present():
+    parsed = parse_files({"following.json": json.dumps([_item("x")]).encode()})
+    assert parsed.extras == {}
+
+
+def test_recently_unfollowed_variant_name():
+    blob = json.dumps([_item("z")]).encode()
+    parsed = parse_files(
+        {"following.json": json.dumps([_item("x")]).encode(),
+         "recently_unfollowed_profiles.json": blob}
+    )
+    assert "Recently unfollowed" in parsed.extras
+
+
 def test_timestamp_and_href_parsed():
     blob = json.dumps([_item("a", ts=1609459200)]).encode()
     parsed = parse_files({"following.json": blob})
