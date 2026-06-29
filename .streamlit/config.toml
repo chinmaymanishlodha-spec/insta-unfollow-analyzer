@@ -1,0 +1,8 @@
+# Disable Streamlit's usage-stats telemetry. Your uploaded data is never part
+# of telemetry, but this turns off Streamlit's own anonymous usage reporting too.
+[browser]
+gatherUsageStats = false
+
+[server]
+# Keep uploads in memory; do not persist. 400 MB cap is generous for exports.
+maxUploadSize = 400

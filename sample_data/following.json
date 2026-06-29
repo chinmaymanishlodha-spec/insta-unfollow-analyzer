@@ -1,0 +1,59 @@
+{
+  "relationships_following": [
+    {
+      "title": "",
+      "media_list_data": [],
+      "string_list_data": [
+        {
+          "href": "https://www.instagram.com/alice",
+          "value": "alice",
+          "timestamp": 1609459200
+        }
+      ]
+    },
+    {
+      "title": "",
+      "media_list_data": [],
+      "string_list_data": [
+        {
+          "href": "https://www.instagram.com/Bob",
+          "value": "Bob",
+          "timestamp": 1612137600
+        }
+      ]
+    },
+    {
+      "title": "",
+      "media_list_data": [],
+      "string_list_data": [
+        {
+          "href": "https://www.instagram.com/carol",
+          "value": "carol",
+          "timestamp": 1614556800
+        }
+      ]
+    },
+    {
+      "title": "",
+      "media_list_data": [],
+      "string_list_data": [
+        {
+          "href": "https://www.instagram.com/dave",
+          "value": "dave",
+          "timestamp": 1617235200
+        }
+      ]
+    },
+    {
+      "title": "",
+      "media_list_data": [],
+      "string_list_data": [
+        {
+          "href": "https://www.instagram.com/EVE",
+          "value": "EVE",
+          "timestamp": 1619827200
+        }
+      ]
+    }
+  ]
+}
