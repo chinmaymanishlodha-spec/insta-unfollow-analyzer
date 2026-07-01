@@ -396,14 +396,43 @@ with st.sidebar:
         placeholder="celebrity_i_like\nmy_alt_account",
         height=140,
     )
+    st.divider()
+    st.subheader("🎯 Daily batch")
+    batch_size = st.number_input(
+        "Accounts per day",
+        min_value=10, max_value=500, value=150, step=10,
+        help="Instagram action-blocks bulk unfollowing. ~100–200/day is a common "
+             "safe ceiling. Stop when you've done the day's batch.",
+    )
+    batch_order = st.selectbox(
+        "Do them in this order",
+        ["Oldest follows first", "Newest follows first", "A → Z"],
+        help="Oldest one-way follows first is usually the best cleanup order.",
+    )
+
 whitelist = whitelist_raw.splitlines() if whitelist_raw else []
 headline = apply_whitelist(result.not_following_back, whitelist)
 excluded_n = len(result.not_following_back) - len(headline)
 
-tab_dash, tab_unfollow, tab_fans, tab_mutual, tab_more = st.tabs(
+
+def _order_candidates(accounts: list[Account], order: str) -> list[Account]:
+    """Sort unfollow candidates for the daily batch.
+
+    Accounts lacking a timestamp sort last for the date-based orders so the
+    well-dated ones lead. 'A → Z' is a stable case-insensitive username sort.
+    """
+    if order == "A → Z":
+        return sorted(accounts, key=lambda a: a.username.lower())
+    # Date-based: missing timestamp -> sentinel that pushes it to the end.
+    if order == "Newest follows first":
+        return sorted(accounts, key=lambda a: (a.timestamp or 0), reverse=True)
+    return sorted(accounts, key=lambda a: (a.timestamp is None, a.timestamp or 0))
+
+tab_dash, tab_batch, tab_unfollow, tab_fans, tab_mutual, tab_more = st.tabs(
     [
         "📊 Dashboard",
-        f"✅ Unfollow candidates ({len(headline)})",
+        f"🎯 Today's batch ({len(headline)} to clear)",
+        f"✅ All candidates ({len(headline)})",
         f"🙈 I don't follow back ({result.counts['not_followed_back']})",
         f"🤝 Mutuals ({result.counts['mutuals']})",
         "🧩 More insights",
@@ -439,6 +468,73 @@ with tab_dash:
     if not foll_hist.empty:
         st.subheader("📈 When people followed you")
         st.bar_chart(foll_hist)
+
+# --- Today's batch (daily hit-list) ----------------------------------------
+with tab_batch:
+    st.markdown("### 🎯 Your daily hit-list")
+    st.markdown(
+        "Instagram blocks bulk unfollowing, so clear **one batch per day**. "
+        "Fastest way: on a computer open **instagram.com → your profile → "
+        "Following**, keep the list below next to it, and click **Unfollow** on "
+        "each name (2 clicks each). Stop when the batch is done — come back tomorrow."
+    )
+
+    ordered = _order_candidates(headline, batch_order)
+    total = len(ordered)
+    if total == 0:
+        st.info("🎉 Nothing to clear (after your whitelist). You're all set.")
+    else:
+        size = int(batch_size)
+        n_batches = (total + size - 1) // size
+        day = st.number_input(
+            f"Which batch are you on today? (1–{n_batches})",
+            min_value=1, max_value=n_batches, value=1, step=1,
+            help="Batches are fixed slices, so 'batch 5' is always the same accounts. "
+                 "Just increment this each day.",
+        )
+        start = (int(day) - 1) * size
+        end = min(start + size, total)
+        batch = ordered[start:end]
+
+        done_estimate = start  # everything before today's batch is assumed done
+        st.progress(
+            end / total,
+            text=f"Batch {int(day)} of {n_batches} · accounts {start + 1}–{end} of "
+                 f"{total:,}  ·  ~{done_estimate:,} cleared so far",
+        )
+
+        st.markdown("**📋 Today's usernames — copy these (hover → copy icon):**")
+        st.code("\n".join(a.username for a in batch), language=None)
+
+        cta_a, cta_b = st.columns(2)
+        with cta_a:
+            st.link_button(
+                "🌐 Open instagram.com Following list",
+                "https://www.instagram.com/",
+                use_container_width=True,
+            )
+        with cta_b:
+            st.download_button(
+                "⬇️ Download today's batch (CSV)",
+                data="\n".join(a.username for a in batch).encode("utf-8"),
+                file_name=f"batch_{int(day)}_of_{n_batches}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key=f"dl_batch_{int(day)}",
+            )
+
+        st.caption(
+            "Prefer to click through profiles instead? Each row below opens the "
+            "account directly."
+        )
+        _show_table(batch, key=f"today_batch_{int(day)}", empty_msg="—")
+
+        st.info(
+            f"At {size}/day this whole cleanup ({total:,} accounts) takes about "
+            f"**{n_batches} days**. That pace is set by Instagram's limits — going "
+            "faster risks an action-block."
+        )
+
 
 # --- Unfollow candidates (assisted checklist) ------------------------------
 with tab_unfollow:
