@@ -1,0 +1,2 @@
+# Keep Windows batch launchers as CRLF so cmd.exe runs them reliably.
+*.bat text eol=crlf
